@@ -21,7 +21,6 @@ precheck_required_free_mb_root: 2048
 precheck_required_free_mb_var: 2048
 precheck_required_free_mb_tmp: 512
 precheck_required_free_mb_backup: 2048
-precheck_expected_zabbix_target_major: "7.4"
 
 zabbix_upgrade_package_candidates:
   - zabbix-server-pgsql
@@ -36,5 +35,5 @@ zabbix_services_to_restart:
 
 zabbix_postcheck_log_lines: 50
 zabbix_target_major: "7.4"
-zabbix_release_deb_url: "https://repo.zabbix.com/zabbix/7.4/release/ubuntu/pool/main/z/zabbix-release/zabbix-release_latest_7.4+ubuntu24.04_all.deb"
-zabbix_release_deb_local: "/tmp/zabbix-release_latest_7.4+ubuntu24.04_all.deb"
+zabbix_release_deb_url: "https://repo.zabbix.com/zabbix/{{ zabbix_target_major }}/release/ubuntu/pool/main/z/zabbix-release/zabbix-release_latest_{{ zabbix_target_major }}+ubuntu24.04_all.deb"
+zabbix_release_deb_local: "/tmp/zabbix-release_latest_{{ zabbix_target_major }}+ubuntu24.04_all.deb"

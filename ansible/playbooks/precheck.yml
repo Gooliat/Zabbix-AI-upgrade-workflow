@@ -51,9 +51,9 @@
     - name: Assert apt candidates match expected target major version
       assert:
         that:
-          - precheck_expected_zabbix_target_major in zabbix_candidate_versions.stdout
-        fail_msg: "APT candidate versions do not match expected Zabbix target major version {{ precheck_expected_zabbix_target_major }}"
-        success_msg: "APT candidate versions match expected Zabbix target major version {{ precheck_expected_zabbix_target_major }}"
+          - zabbix_target_major in zabbix_candidate_versions.stdout
+        fail_msg: "APT candidate versions do not match expected Zabbix target major version {{ zabbix_target_major }}"
+        success_msg: "APT candidate versions match expected Zabbix target major version {{ zabbix_target_major }}"
 
     - name: Gather service facts
       service_facts:
