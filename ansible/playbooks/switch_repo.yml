@@ -1,5 +1,5 @@
 ---
-- name: Switch Zabbix repository from 7.2 to 7.4
+- name: Switch Zabbix repository to target major version
   hosts: zabbix_server
   become: true
   gather_facts: true
@@ -11,13 +11,13 @@
           - "Target major version: {{ zabbix_target_major }}"
           - "Release package URL: {{ zabbix_release_deb_url }}"
 
-    - name: Download Zabbix 7.4 release package
+    - name: Download Zabbix release package for target major version
       get_url:
         url: "{{ zabbix_release_deb_url }}"
         dest: "{{ zabbix_release_deb_local }}"
         mode: "0644"
 
-    - name: Install Zabbix 7.4 release package
+    - name: Install Zabbix release package for target major version
       apt:
         deb: "{{ zabbix_release_deb_local }}"
       register: zabbix_release_install
@@ -50,3 +50,10 @@
     - name: Print apt candidate versions
       debug:
         var: zabbix_candidate_versions.stdout_lines
+
+    - name: Assert apt candidates match target major version after repo switch
+      assert:
+        that:
+          - zabbix_target_major in zabbix_candidate_versions.stdout
+        fail_msg: "APT candidate versions do not match target major version {{ zabbix_target_major }} after repo switch"
+        success_msg: "APT candidate versions match target major version {{ zabbix_target_major }} after repo switch"

@@ -61,7 +61,6 @@
         group: "{{ postgresql_backup_user }}"
         mode: "0750"
 
-
     - name: Save package list
       shell: dpkg-query -W -f='${Package}\t${Version}\n' | sort
       register: dpkg_query_result
@@ -103,6 +102,7 @@
         dest: "{{ backup_metadata_dir }}/zabbix_server.conf"
         remote_src: true
         mode: preserve
+
     - name: Stop zabbix-server before DB backup
       service:
         name: zabbix-server
@@ -130,7 +130,6 @@
         fail_msg: "pg_dump is not installed or not in PATH"
         success_msg: "pg_dump is available"
 
-
     - name: Check permissions on backup path components
       stat:
         path: "{{ item }}"
@@ -148,7 +147,6 @@
           mode={{ item.stat.mode }}
       loop: "{{ backup_path_stats.results }}"
 
-
     - name: Run PostgreSQL backup with pg_dump custom format
       shell: >
         sudo -u {{ postgresql_backup_user }}
@@ -157,7 +155,6 @@
         {{ zabbix_db_name }}
       register: pg_dump_result
       changed_when: true
-
 
     - name: Save pg_dump command result summary
       copy:
@@ -182,22 +179,17 @@
         success_msg: "Database dump file exists and is non-empty"
 
     - name: Validate PostgreSQL custom-format dump structure
-      become: true
-      become_user: "{{ postgresql_backup_user }}"
-      command:
-        argv:
-          - pg_restore
-          - -l
-          - "{{ backup_db_dir }}/{{ zabbix_db_name }}.dump"
+      shell: "pg_restore -l {{ backup_db_dir }}/{{ zabbix_db_name }}.dump | head -n 20"
       register: pg_restore_list_result
       changed_when: false
 
-    - name: Assert pg_restore can read the dump
+    - name: Assert PostgreSQL custom-format dump structure is readable
       assert:
         that:
           - pg_restore_list_result.rc == 0
-        fail_msg: "pg_restore could not read the dump file"
-        success_msg: "pg_restore successfully read the dump file"
+          - pg_restore_list_result.stdout | length > 0
+        fail_msg: "pg_restore could not read the PostgreSQL custom-format dump structure"
+        success_msg: "pg_restore successfully read the PostgreSQL custom-format dump structure"
 
     - name: Archive /etc/zabbix
       archive:
