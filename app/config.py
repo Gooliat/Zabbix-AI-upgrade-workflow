@@ -15,3 +15,6 @@ PLAYBOOK_POSTCHECK = ANSIBLE_ROOT / "playbooks" / "postcheck.yml"
 PLAYBOOK_SWITCH_REPO = ANSIBLE_ROOT / "playbooks" / "switch_repo_7_4.yml"
 
 DEFAULT_HOST = "zabbix"
+
+ZABBIX_SERVER_CONF = "/etc/zabbix/zabbix_server.conf"
+ZABBIX_SERVER_CONF_DIST = "/etc/zabbix/zabbix_server.conf.dpkg-dist"

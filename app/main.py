@@ -5,14 +5,20 @@ from openai import OpenAI
 
 from config import DEFAULT_MODEL
 from tools import (
+    check_remote_file_exists,
+    fetch_official_url_text,
+    get_official_zabbix_upgrade_note_urls,
+    get_remote_unified_diff,
     get_zabbix_packages,
+    get_zabbix_server_conf_paths,
     get_zabbix_version,
     require_approval,
     run_backup,
     run_postcheck,
     run_precheck,
+    run_switch_repo,
     run_upgrade,
-    run_switch_repo
+    sanitize_for_logging,
 )
 
 client = OpenAI()
@@ -191,6 +197,126 @@ def execute_upgrade_workflow(host: str = "zabbix") -> None:
     )
     print(final_summary)
 
+def analyze_upgrade_notes_workflow(
+    from_version: str = "7.2",
+    to_version: str = "7.4",
+) -> None:
+    print("\n=== STEP 1: GET OFFICIAL UPGRADE NOTE URLS ===\n")
+    urls_result = get_official_zabbix_upgrade_note_urls(
+        from_version=from_version,
+        to_version=to_version,
+    )
+    print(json.dumps(urls_result, indent=2))
+
+    urls = urls_result["urls"]
+
+    print("\n=== STEP 2: FETCH MAJOR UPGRADE NOTES ===\n")
+    major_notes = fetch_official_url_text(urls["major_upgrade_notes"])
+    print(json.dumps(major_notes, indent=2))
+
+    print("\n=== STEP 3: FETCH MINOR UPGRADE NOTES ===\n")
+    minor_notes = fetch_official_url_text(urls["minor_upgrade_notes"])
+    print(json.dumps(minor_notes, indent=2))
+
+    print("\n=== STEP 4: FETCH DEBIAN/UBUNTU UPGRADE GUIDE ===\n")
+    package_guide = fetch_official_url_text(urls["debian_ubuntu_upgrade_guide"])
+    print(json.dumps(package_guide, indent=2))
+
+    context = {
+        "environment": {
+            "os": "Ubuntu 24.04",
+            "database": "PostgreSQL",
+            "frontend": "Apache/PHP",
+            "current_style": "Ansible playbooks with AI orchestration",
+        },
+        "from_version": from_version,
+        "to_version": to_version,
+        "urls_result": urls_result,
+        "major_notes": major_notes,
+        "minor_notes": minor_notes,
+        "package_guide": package_guide,
+    }
+
+    print("\n=== STEP 5: AI ANALYSIS ===\n")
+    analysis = ask_model(
+        prompt=(
+            "Read the provided official Zabbix upgrade notes and package upgrade guide. "
+            "Summarize the breaking changes and critical upgrade considerations relevant "
+            "to an Ubuntu 24.04, PostgreSQL, Apache/PHP Zabbix deployment. "
+            "Also state what should be added or improved in our precheck, backup, upgrade, "
+            "or postcheck playbooks/workflows."
+        ),
+        context=context,
+    )
+    print(analysis)
+
+def analyze_zabbix_server_config_review_workflow(host: str = "zabbix") -> None:
+    print("\n=== STEP 1: GET CONFIG PATHS ===\n")
+    path_result = get_zabbix_server_conf_paths(host=host)
+    print(json.dumps(path_result, indent=2))
+
+    print("\n=== STEP 2: CHECK ACTIVE CONFIG EXISTS ===\n")
+    active_exists = check_remote_file_exists(
+        path=path_result["active_config"],
+        host=host,
+    )
+    print(json.dumps(active_exists, indent=2))
+
+    print("\n=== STEP 3: CHECK PACKAGE DIST CONFIG EXISTS ===\n")
+    dist_exists = check_remote_file_exists(
+        path=path_result["package_dist_config"],
+        host=host,
+    )
+    print(json.dumps(dist_exists, indent=2))
+
+    if not active_exists.get("exists", False):
+        print("\n=== WORKFLOW STOPPED ===\n")
+        print(f"Active config file does not exist: {path_result['active_config']}")
+        return
+
+    if not dist_exists.get("exists", False):
+        print("\n=== WORKFLOW STOPPED ===\n")
+        print(f"Package dist config file does not exist: {path_result['package_dist_config']}")
+        return
+
+    print("\n=== STEP 4: GET UNIFIED DIFF ===\n")
+    diff_result = get_remote_unified_diff(
+        left_path=path_result["active_config"],
+        right_path=path_result["package_dist_config"],
+        host=host,
+    )
+    print(json.dumps(sanitize_for_logging(diff_result), indent=2))
+
+    context = {
+        "host": host,
+        "paths": path_result,
+        "active_exists": active_exists,
+        "dist_exists": dist_exists,
+        "diff_result": diff_result,
+        "environment": {
+            "os": "Ubuntu 24.04",
+            "role": "Zabbix server with PostgreSQL and Apache/PHP frontend",
+            "upgrade_context": "Upgraded from 7.2 to 7.4",
+        },
+    }
+
+    print("\n=== STEP 5: AI CONFIG REVIEW ===\n")
+    analysis = ask_model(
+        prompt=(
+            "Analyze the provided unified diff between the active Zabbix server configuration "
+            "and the package-provided .dpkg-dist file. Summarize the most important differences. "
+            "Focus on new parameters, removed or relocated parameters, and anything relevant "
+            "to security, TLS, frontend communication, or upgrade safety. "
+            "Classify findings into: "
+            "1) safe to ignore for now, "
+            "2) should be reviewed soon, "
+            "3) likely important to evaluate manually. "
+            "Do not suggest blind merging. Be conservative and operationally practical."
+        ),
+        context=context,
+    )
+    print(analysis)
+
 def main() -> None:
     if len(sys.argv) < 2:
         print('Usage: python3 main.py "Prepare upgrade on host zabbix"')
@@ -206,9 +332,19 @@ def main() -> None:
         execute_upgrade_workflow(host="zabbix")
         return
 
+    if "upgrade notes" in user_input or "release notes" in user_input:
+        analyze_upgrade_notes_workflow(from_version="7.2", to_version="7.4")
+        return
+
+    if "config review" in user_input or "dpkg-dist" in user_input:
+        analyze_zabbix_server_config_review_workflow(host="zabbix")
+        return
+
     print("Unsupported command pattern for this workflow version.")
     print('Try: python3 main.py "Prepare for a Zabbix upgrade on host zabbix"')
     print('Or:  python3 main.py "Execute the Zabbix upgrade on host zabbix"')
+    print('Or:  python3 main.py "Read the official Zabbix 7.2 to 7.4 upgrade notes"')
+    print('Or:  python3 main.py "Run a config review for zabbix_server.conf and dpkg-dist"')
 
 
 if __name__ == "__main__":
