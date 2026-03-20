@@ -4,16 +4,16 @@ APP_ROOT = Path("/home/ansible/zabbix-ai/app")
 ANSIBLE_ROOT = Path("/home/ansible/zabbix-ai/ansible")
 RUN_LOG_DIR = APP_ROOT / "run_logs"
 
-DEFAULT_TARGET_MAJOR = "7.4"
 DEFAULT_MODEL = "gpt-5.4"
 
 INVENTORY_FILE = ANSIBLE_ROOT / "inventory" / "staging.ini"
+GROUP_VARS_FILE = ANSIBLE_ROOT / "inventory" / "group_vars" / "all.yml"
 
 PLAYBOOK_PRECHECK = ANSIBLE_ROOT / "playbooks" / "precheck.yml"
 PLAYBOOK_BACKUP = ANSIBLE_ROOT / "playbooks" / "backup.yml"
 PLAYBOOK_UPGRADE = ANSIBLE_ROOT / "playbooks" / "upgrade_server.yml"
 PLAYBOOK_POSTCHECK = ANSIBLE_ROOT / "playbooks" / "postcheck.yml"
-PLAYBOOK_SWITCH_REPO = ANSIBLE_ROOT / "playbooks" / "switch_repo_7_4.yml"
+PLAYBOOK_SWITCH_REPO = ANSIBLE_ROOT / "playbooks" / "switch_repo.yml"
 
 DEFAULT_HOST = "zabbix"
 
@@ -23,3 +23,4 @@ ZABBIX_SERVER_CONF_DIST = "/etc/zabbix/zabbix_server.conf.dpkg-dist"
 DEFAULT_OS_FAMILY = "Ubuntu 24.04"
 DEFAULT_DB_TYPE = "PostgreSQL"
 DEFAULT_FRONTEND_TYPE = "Apache/PHP"
+DEFAULT_OUTPUT_LANGUAGE = "Swedish"

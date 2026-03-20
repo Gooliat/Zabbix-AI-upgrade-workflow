@@ -1,9 +1,10 @@
 import json
 import sys
 import re
+import yaml
 from openai import OpenAI
 
-from config import DEFAULT_MODEL, DEFAULT_TARGET_MAJOR
+from config import DEFAULT_MODEL, GROUP_VARS_FILE, DEFAULT_OUTPUT_LANGUAGE
 from tools import (
     check_remote_file_exists,
     fetch_official_url_text,
@@ -23,7 +24,7 @@ from tools import (
 
 client = OpenAI()
 
-SYSTEM_PROMPT = """
+SYSTEM_PROMPT = f"""
 You are an infrastructure upgrade assistant for Zabbix.
 
 Rules:
@@ -32,6 +33,8 @@ Rules:
 - Be operationally precise.
 - If any tool result shows a non-zero return code, explain the failure and recommend the next safe step.
 - Do not invent actions that were not run.
+- Write all operator-facing summaries in {DEFAULT_OUTPUT_LANGUAGE}.
+- Keep commands, filenames, configuration keys, package names, and log excerpts in English when needed.
 """
 
 def ask_model(prompt: str, context: dict) -> str:
@@ -63,7 +66,21 @@ def get_installed_major_version(host: str = "zabbix") -> tuple[dict, str | None]
     installed_major = extract_major_version(version_result.get("stdout", ""))
     return version_result, installed_major
 
-def prepare_upgrade_workflow(host: str = "zabbix", target_major: str = DEFAULT_TARGET_MAJOR) -> None:
+def get_target_major_from_ansible() -> str:
+    with open(GROUP_VARS_FILE, "r", encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+
+    target_major = data.get("zabbix_target_major")
+    if not target_major:
+        raise ValueError(
+            f"zabbix_target_major is not defined in {GROUP_VARS_FILE}"
+        )
+
+    return str(target_major)
+
+def prepare_upgrade_workflow(host: str = "zabbix", target_major: str | None = None) -> None:
+    if target_major is None:
+        target_major = get_target_major_from_ansible()
     print("\n=== STEP 1: COLLECT VERSION ===\n")
     version_result = get_zabbix_version(host=host)
     print(json.dumps(version_result, indent=2))
@@ -139,7 +156,9 @@ def prepare_upgrade_workflow(host: str = "zabbix", target_major: str = DEFAULT_T
     )
     print(final_summary)
 
-def execute_upgrade_workflow(host: str = "zabbix", target_major: str = DEFAULT_TARGET_MAJOR) -> None:
+def execute_upgrade_workflow(host: str = "zabbix", target_major: str | None = None) -> None:
+    if target_major is None:
+        target_major = get_target_major_from_ansible()
     print("\n=== STEP 1: VERSION CHECK ===\n")
     version_result = get_zabbix_version(host=host)
     print(json.dumps(version_result, indent=2))
@@ -210,8 +229,10 @@ def execute_upgrade_workflow(host: str = "zabbix", target_major: str = DEFAULT_T
 
 def analyze_upgrade_notes_workflow(
     from_version: str,
-    to_version: str = DEFAULT_TARGET_MAJOR,
+    to_version: str | None = None,
 ) -> None:
+    if to_version is None:
+        to_version = get_target_major_from_ansible()
     print("\n=== STEP 1: GET OFFICIAL UPGRADE NOTE URLS ===\n")
     urls_result = get_official_zabbix_upgrade_note_urls(
         from_version=from_version,
@@ -352,9 +373,11 @@ def main() -> None:
             print(json.dumps(version_result, indent=2))
             return
 
+        target_major = get_target_major_from_ansible()
+
         analyze_upgrade_notes_workflow(
             from_version=installed_major,
-            to_version=DEFAULT_TARGET_MAJOR,
+            to_version=target_major,
         )
         return
 
