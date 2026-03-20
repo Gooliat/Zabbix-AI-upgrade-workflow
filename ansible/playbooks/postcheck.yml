@@ -1,0 +1,65 @@
+---
+- name: Postcheck Zabbix server after upgrade
+  hosts: zabbix_server
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Gather package facts
+      package_facts:
+        manager: auto
+
+    - name: Gather service facts
+      service_facts:
+
+    - name: Show installed Zabbix package versions
+      debug:
+        msg: >-
+          {{
+            ansible_facts['packages']
+            | dict2items
+            | selectattr('key', 'search', '^zabbix')
+            | list
+          }}
+
+    - name: Assert zabbix-server package is installed
+      assert:
+        that:
+          - "'zabbix-server-pgsql' in ansible_facts['packages']"
+        fail_msg: "zabbix-server-pgsql is not installed"
+        success_msg: "zabbix-server-pgsql is installed"
+
+    - name: Assert zabbix-server service is running
+      assert:
+        that:
+          - ansible_facts['services']['zabbix-server.service']['state'] == 'running'
+        fail_msg: "zabbix-server.service is not running"
+        success_msg: "zabbix-server.service is running"
+
+    - name: Assert apache2 service is running
+      assert:
+        that:
+          - ansible_facts['services']['apache2.service']['state'] == 'running'
+        fail_msg: "apache2.service is not running"
+        success_msg: "apache2.service is running"
+
+    - name: Check frontend HTTP response
+      uri:
+        url: "http://{{ ansible_facts['default_ipv4']['address'] }}/zabbix"
+        method: GET
+        status_code: 200
+        return_content: false
+      register: frontend_check
+
+    - name: Show frontend check result
+      debug:
+        var: frontend_check.status
+
+    - name: Show recent zabbix-server log lines
+      shell: "journalctl -u zabbix-server -n {{ zabbix_postcheck_log_lines }} --no-pager"
+      register: zabbix_journal
+      changed_when: false
+
+    - name: Print recent zabbix-server log lines
+      debug:
+        var: zabbix_journal.stdout_lines

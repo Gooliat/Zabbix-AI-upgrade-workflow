@@ -1,0 +1,123 @@
+---
+- name: Zabbix precheck
+  hosts: zabbix_server
+  become: true
+  gather_facts: true
+
+  vars:
+    zabbix_packages_common:
+      - zabbix-server-pgsql
+      - zabbix-server-mysql
+      - zabbix-frontend-php
+      - zabbix-apache-conf
+      - zabbix-nginx-conf
+      - zabbix-sql-scripts
+      - zabbix-agent
+      - zabbix-agent2
+
+  tasks:
+    - name: Show basic host summary
+      debug:
+        msg:
+          - "Host: {{ ansible_facts['hostname'] }}"
+          - "OS: {{ ansible_facts['distribution'] }} {{ ansible_facts['distribution_version'] }}"
+          - "Kernel: {{ ansible_facts['kernel'] }}"
+          - "IPv4: {{ ansible_facts['default_ipv4']['address'] | default('N/A') }}"
+
+    - name: Gather package facts
+      package_facts:
+        manager: auto
+
+    - name: Gather service facts
+      service_facts:
+
+    - name: Check free space on /
+      set_fact:
+        root_mount: "{{ ansible_facts['mounts'] | selectattr('mount', 'equalto', '/') | list | first }}"
+        var_mount: "{{ ansible_facts['mounts'] | selectattr('mount', 'equalto', '/var') | list | first | default({}) }}"
+        tmp_mount: "{{ ansible_facts['mounts'] | selectattr('mount', 'equalto', '/tmp') | list | first | default({}) }}"
+
+    - name: Assert free space on /
+      assert:
+        that:
+          - "(root_mount.size_available / 1024 / 1024) | int >= precheck_required_free_mb_root"
+        fail_msg: "Insufficient free space on /"
+        success_msg: "Free space on / is OK"
+
+    - name: Assert free space on /var when dedicated mount exists
+      assert:
+        that:
+          - "(var_mount.size_available / 1024 / 1024) | int >= precheck_required_free_mb_var"
+        fail_msg: "Insufficient free space on /var"
+        success_msg: "Free space on /var is OK"
+      when: var_mount.mount is defined
+
+    - name: Assert free space on /tmp when dedicated mount exists
+      assert:
+        that:
+          - "(tmp_mount.size_available / 1024 / 1024) | int >= precheck_required_free_mb_tmp"
+        fail_msg: "Insufficient free space on /tmp"
+        success_msg: "Free space on /tmp is OK"
+      when: tmp_mount.mount is defined
+
+    - name: Check if Zabbix config directory exists
+      stat:
+        path: "{{ zabbix_config_dir }}"
+      register: zabbix_config_dir_stat
+
+    - name: Check if Zabbix web directory exists
+      stat:
+        path: "{{ zabbix_web_dir }}"
+      register: zabbix_web_dir_stat
+
+    - name: Check zabbix_server.conf
+      stat:
+        path: "{{ zabbix_config_dir }}/zabbix_server.conf"
+      register: zabbix_server_conf_stat
+
+    - name: Check candidate Zabbix packages installed
+      debug:
+        msg: >-
+          Installed package candidates:
+          {{
+            zabbix_packages_common
+            | select('in', ansible_facts['packages'].keys() | list)
+            | list
+          }}
+
+    - name: Check zabbix-server service presence
+      debug:
+        msg: >-
+          Known services matching zabbix:
+          {{
+            ansible_facts['services'].keys()
+            | select('search', 'zabbix')
+            | list
+          }}
+
+    - name: Check apt cache update works
+      apt:
+        update_cache: true
+      changed_when: false
+
+    - name: Check backup directory parent exists
+      stat:
+        path: /opt
+      register: opt_dir_stat
+
+    - name: Assert critical paths exist
+      assert:
+        that:
+          - zabbix_config_dir_stat.stat.exists
+          - zabbix_server_conf_stat.stat.exists
+          - opt_dir_stat.stat.exists
+        fail_msg: "One or more critical paths are missing"
+        success_msg: "Critical paths exist"
+
+    - name: Print precheck summary
+      debug:
+        msg:
+          - "Precheck completed successfully on {{ inventory_hostname }}"
+          - "Config dir exists: {{ zabbix_config_dir_stat.stat.exists }}"
+          - "Web dir exists: {{ zabbix_web_dir_stat.stat.exists }}"
+          - "zabbix_server.conf exists: {{ zabbix_server_conf_stat.stat.exists }}"

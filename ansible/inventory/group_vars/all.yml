@@ -1,0 +1,38 @@
+---
+ansible_user: ansible
+ansible_ssh_private_key_file: /home/ansible/.ssh/id_ed25519
+ansible_python_interpreter: /usr/bin/python3.12
+
+zabbix_backup_dir: /opt/zabbix-backup
+zabbix_config_dir: /etc/zabbix
+zabbix_web_dir: /usr/share/zabbix
+zabbix_server_conf: /etc/zabbix/zabbix_server.conf
+
+apache_zabbix_conf_candidates:
+  - /etc/apache2/conf-enabled/zabbix.conf
+  - /etc/apache2/conf-available/zabbix.conf
+  - /etc/zabbix/apache.conf
+
+postgresql_backup_user: postgres
+zabbix_db_name: zabbix
+zabbix_db_user: zabbix
+
+precheck_required_free_mb_root: 2048
+precheck_required_free_mb_var: 2048
+precheck_required_free_mb_tmp: 512
+
+zabbix_upgrade_package_candidates:
+  - zabbix-server-pgsql
+  - zabbix-frontend-php
+  - zabbix-apache-conf
+  - zabbix-sql-scripts
+  - zabbix-agent2
+
+zabbix_services_to_restart:
+  - zabbix-server
+  - apache2
+
+zabbix_postcheck_log_lines: 50
+zabbix_target_major: "7.4"
+zabbix_release_deb_url: "https://repo.zabbix.com/zabbix/7.4/release/ubuntu/pool/main/z/zabbix-release/zabbix-release_latest_7.4+ubuntu24.04_all.deb"
+zabbix_release_deb_local: "/tmp/zabbix-release_latest_7.4+ubuntu24.04_all.deb"

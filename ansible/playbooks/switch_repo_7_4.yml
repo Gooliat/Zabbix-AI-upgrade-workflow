@@ -1,0 +1,52 @@
+---
+- name: Switch Zabbix repository from 7.2 to 7.4
+  hosts: zabbix_server
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Show target repo information
+      debug:
+        msg:
+          - "Target major version: {{ zabbix_target_major }}"
+          - "Release package URL: {{ zabbix_release_deb_url }}"
+
+    - name: Download Zabbix 7.4 release package
+      get_url:
+        url: "{{ zabbix_release_deb_url }}"
+        dest: "{{ zabbix_release_deb_local }}"
+        mode: "0644"
+
+    - name: Install Zabbix 7.4 release package
+      apt:
+        deb: "{{ zabbix_release_deb_local }}"
+      register: zabbix_release_install
+
+    - name: Show release package install result
+      debug:
+        var: zabbix_release_install
+
+    - name: Refresh apt cache after repo switch
+      apt:
+        update_cache: true
+      changed_when: false
+
+    - name: Show installed zabbix-release package version
+      shell: "dpkg -l | awk '/^ii\\s+zabbix-release/ {print $2, $3}'"
+      register: zabbix_release_version
+      changed_when: false
+
+    - name: Print zabbix-release version
+      debug:
+        var: zabbix_release_version.stdout
+
+    - name: Show apt candidate versions for key Zabbix packages
+      shell: |
+        apt-cache policy zabbix-server-pgsql zabbix-frontend-php zabbix-agent2 \
+        | sed -n '/Candidate:/p'
+      register: zabbix_candidate_versions
+      changed_when: false
+
+    - name: Print apt candidate versions
+      debug:
+        var: zabbix_candidate_versions.stdout_lines

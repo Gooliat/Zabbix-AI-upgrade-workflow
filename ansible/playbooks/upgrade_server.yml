@@ -1,0 +1,94 @@
+---
+- name: Upgrade Zabbix server packages
+  hosts: zabbix_server
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Show host and timestamp
+      debug:
+        msg:
+          - "Host: {{ ansible_facts['hostname'] }}"
+          - "Upgrade started at: {{ ansible_facts['date_time']['iso8601'] }}"
+
+    - name: Gather package facts
+      package_facts:
+        manager: auto
+
+    - name: Determine installed Zabbix packages to upgrade
+      set_fact:
+        zabbix_installed_upgrade_packages: >-
+          {{
+            zabbix_upgrade_package_candidates
+            | select('in', ansible_facts['packages'].keys() | list)
+            | list
+          }}
+
+    - name: Show package list selected for upgrade
+      debug:
+        var: zabbix_installed_upgrade_packages
+
+    - name: Assert at least one Zabbix package is installed
+      assert:
+        that:
+          - zabbix_installed_upgrade_packages | length > 0
+        fail_msg: "No installed Zabbix packages matched the upgrade candidate list"
+        success_msg: "Installed Zabbix packages detected"
+
+    - name: Stop zabbix-server before package upgrade
+      ansible.builtin.service:
+        name: zabbix-server
+        state: stopped
+
+    - name: Update apt cache
+      ansible.builtin.apt:
+        update_cache: true
+      changed_when: false
+
+    - name: Upgrade installed Zabbix packages only
+      ansible.builtin.apt:
+        name: "{{ zabbix_installed_upgrade_packages }}"
+        state: latest
+      register: zabbix_upgrade_result
+
+    - name: Show package upgrade result
+      debug:
+        var: zabbix_upgrade_result
+
+    - name: Restart Zabbix-related services
+      ansible.builtin.service:
+        name: "{{ item }}"
+        state: restarted
+      loop: "{{ zabbix_services_to_restart }}"
+
+    - name: Collect service facts after restart
+      service_facts:
+
+    - name: Show service state summary
+      debug:
+        msg:
+          - "zabbix-server.service => {{ ansible_facts['services']['zabbix-server.service']['state'] | default('missing') }}"
+          - "apache2.service => {{ ansible_facts['services']['apache2.service']['state'] | default('missing') }}"
+
+    - name: Assert zabbix-server is running
+      assert:
+        that:
+          - ansible_facts['services']['zabbix-server.service']['state'] == 'running'
+        fail_msg: "zabbix-server.service is not running after upgrade"
+        success_msg: "zabbix-server.service is running"
+
+    - name: Assert apache2 is running
+      assert:
+        that:
+          - ansible_facts['services']['apache2.service']['state'] == 'running'
+        fail_msg: "apache2.service is not running after upgrade"
+        success_msg: "apache2.service is running"
+
+    - name: Show recent zabbix-server log lines
+      shell: "journalctl -u zabbix-server -n 50 --no-pager"
+      register: zabbix_journal
+      changed_when: false
+
+    - name: Print recent zabbix-server log lines
+      debug:
+        var: zabbix_journal.stdout_lines

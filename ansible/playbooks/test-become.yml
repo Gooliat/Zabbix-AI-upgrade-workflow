@@ -1,0 +1,12 @@
+- name: Verify sudo works
+  hosts: all
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Show current user with whoami
+      command: whoami
+      register: whoami_result
+
+    - name: Print whoami result
+      debug:
+        var: whoami_result.stdout

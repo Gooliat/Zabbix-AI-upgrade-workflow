@@ -1,0 +1,205 @@
+---
+- name: Backup Zabbix server
+  hosts: zabbix_server
+  become: true
+  gather_facts: true
+
+  vars:
+    backup_timestamp: "{{ ansible_facts['date_time']['date'] }}_{{ ansible_facts['date_time']['time'] | regex_replace(':', '') }}"
+    backup_root: "{{ zabbix_backup_dir }}/{{ backup_timestamp }}"
+    backup_metadata_dir: "{{ backup_root }}/metadata"
+    backup_db_dir: "{{ backup_root }}/db"
+    backup_config_dir: "{{ backup_root }}/config"
+    backup_web_dir: "{{ backup_root }}/web"
+    backup_apache_dir: "{{ backup_root }}/apache"
+
+  tasks:
+    - name: Show backup target
+      debug:
+        msg:
+          - "Backup root: {{ backup_root }}"
+          - "Database name: {{ zabbix_db_name }}"
+          - "Database user: {{ zabbix_db_user }}"
+          - "Config dir: {{ zabbix_config_dir }}"
+          - "Web dir: {{ zabbix_web_dir }}"
+          - "Server config: {{ zabbix_server_conf }}"
+
+    - name: Ensure backup root exists
+      file:
+        path: "{{ zabbix_backup_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Ensure timestamped backup root exists
+      file:
+        path: "{{ backup_root }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Ensure root-owned backup subdirectories exist
+      file:
+        path: "{{ item }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0750"
+      loop:
+        - "{{ backup_metadata_dir }}"
+        - "{{ backup_config_dir }}"
+        - "{{ backup_web_dir }}"
+        - "{{ backup_apache_dir }}"
+
+    - name: Ensure PostgreSQL dump directory exists and is writable by postgres
+      file:
+        path: "{{ backup_db_dir }}"
+        state: directory
+        owner: "{{ postgresql_backup_user }}"
+        group: "{{ postgresql_backup_user }}"
+        mode: "0750"
+
+
+    - name: Save package list
+      shell: dpkg-query -W -f='${Package}\t${Version}\n' | sort
+      register: dpkg_query_result
+      changed_when: false
+
+    - name: Write package list to backup
+      copy:
+        dest: "{{ backup_metadata_dir }}/packages.txt"
+        mode: "0640"
+        content: "{{ dpkg_query_result.stdout }}\n"
+
+    - name: Save host facts summary
+      copy:
+        dest: "{{ backup_metadata_dir }}/host_summary.txt"
+        mode: "0640"
+        content: |
+          Hostname={{ ansible_facts['hostname'] }}
+          FQDN={{ ansible_facts['fqdn'] | default('') }}
+          OS={{ ansible_facts['distribution'] }} {{ ansible_facts['distribution_version'] }}
+          Kernel={{ ansible_facts['kernel'] }}
+          DefaultIPv4={{ ansible_facts['default_ipv4']['address'] | default('') }}
+          Date={{ ansible_facts['date_time']['iso8601'] }}
+
+    - name: Save DB settings metadata
+      copy:
+        dest: "{{ backup_metadata_dir }}/db_settings.txt"
+        mode: "0640"
+        content: |
+          DBName={{ zabbix_db_name }}
+          DBUser={{ zabbix_db_user }}
+          BackupOSUser={{ postgresql_backup_user }}
+          BackupTimestamp={{ backup_timestamp }}
+          InventoryHost={{ inventory_hostname }}
+          Hostname={{ ansible_facts['hostname'] }}
+
+    - name: Save zabbix_server.conf
+      copy:
+        src: "{{ zabbix_server_conf }}"
+        dest: "{{ backup_metadata_dir }}/zabbix_server.conf"
+        remote_src: true
+        mode: preserve
+
+    - name: Check whether pg_dump exists
+      command: which pg_dump
+      register: pg_dump_check
+      changed_when: false
+
+    - name: Assert pg_dump exists
+      assert:
+        that:
+          - pg_dump_check.rc == 0
+        fail_msg: "pg_dump is not installed or not in PATH"
+        success_msg: "pg_dump is available"
+
+
+    - name: Check permissions on backup path components
+      stat:
+        path: "{{ item }}"
+      loop:
+        - "{{ zabbix_backup_dir }}"
+        - "{{ backup_root }}"
+        - "{{ backup_db_dir }}"
+      register: backup_path_stats
+
+    - name: Show permissions on backup path components
+      debug:
+        msg: >-
+          {{ item.stat.path }} owner={{ item.stat.pw_name }}
+          group={{ item.stat.gr_name }}
+          mode={{ item.stat.mode }}
+      loop: "{{ backup_path_stats.results }}"
+
+
+    - name: Run PostgreSQL backup with pg_dump custom format
+      shell: >
+        sudo -u {{ postgresql_backup_user }}
+        pg_dump --format=custom
+        --file={{ backup_db_dir }}/{{ zabbix_db_name }}.dump
+        {{ zabbix_db_name }}
+      register: pg_dump_result
+      changed_when: true
+
+
+    - name: Save pg_dump command result summary
+      copy:
+        dest: "{{ backup_metadata_dir }}/pg_dump_result.txt"
+        mode: "0640"
+        content: |
+          rc={{ pg_dump_result.rc }}
+          stdout={{ pg_dump_result.stdout | default('') }}
+          stderr={{ pg_dump_result.stderr | default('') }}
+
+    - name: Archive /etc/zabbix
+      archive:
+        path: "{{ zabbix_config_dir }}"
+        dest: "{{ backup_config_dir }}/etc_zabbix.tar.gz"
+        format: gz
+
+    - name: Check if web directory exists
+      stat:
+        path: "{{ zabbix_web_dir }}"
+      register: zabbix_web_dir_stat
+
+    - name: Archive Zabbix web directory
+      archive:
+        path: "{{ zabbix_web_dir }}"
+        dest: "{{ backup_web_dir }}/usr_share_zabbix.tar.gz"
+        format: gz
+      when: zabbix_web_dir_stat.stat.exists
+
+    - name: Check Apache Zabbix config candidates
+      stat:
+        path: "{{ item }}"
+      loop: "{{ apache_zabbix_conf_candidates }}"
+      register: apache_zabbix_conf_candidates_stat
+
+    - name: Archive existing Apache Zabbix config files
+      archive:
+        path: >-
+          {{
+            apache_zabbix_conf_candidates_stat.results
+            | selectattr('stat.exists', 'equalto', true)
+            | map(attribute='stat.path')
+            | list
+          }}
+        dest: "{{ backup_apache_dir }}/apache_zabbix_conf.tar.gz"
+        format: gz
+      when:
+        - apache_zabbix_conf_candidates_stat.results
+          | selectattr('stat.exists', 'equalto', true)
+          | list
+          | length > 0
+
+    - name: Show final backup summary
+      debug:
+        msg:
+          - "Backup completed successfully"
+          - "Backup root: {{ backup_root }}"
+          - "Database dump: {{ backup_db_dir }}/{{ zabbix_db_name }}.dump"
+          - "Config archive: {{ backup_config_dir }}/etc_zabbix.tar.gz"
+          - "Web archive created: {{ zabbix_web_dir_stat.stat.exists }}"

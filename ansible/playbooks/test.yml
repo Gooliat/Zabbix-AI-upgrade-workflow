@@ -1,0 +1,15 @@
+- name: Verify basic connectivity and facts
+  hosts: all
+  gather_facts: true
+  tasks:
+    - name: Show hostname
+      debug:
+        var: ansible_facts['hostname']
+
+    - name: Show default IPv4 address
+      debug:
+        var: ansible_facts['default_ipv4']['address']
+
+    - name: Show OS distribution
+      debug:
+        var: ansible_facts['distribution']

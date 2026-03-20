@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environments
+app/.venv/
+.venv/
+
+# Logs and runtime artifacts
+app/run_logs/
+*.log
+
+# Secrets / env files
+*.env
+*.env.*
+
+# OS / editor
+.DS_Store
+*.swp
+*.swo
+
+# Ansible temp / retry
+*.retry
