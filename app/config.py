@@ -4,6 +4,7 @@ APP_ROOT = Path("/home/ansible/zabbix-ai/app")
 ANSIBLE_ROOT = Path("/home/ansible/zabbix-ai/ansible")
 RUN_LOG_DIR = APP_ROOT / "run_logs"
 
+DEFAULT_TARGET_MAJOR = "7.4"
 DEFAULT_MODEL = "gpt-5.4"
 
 INVENTORY_FILE = ANSIBLE_ROOT / "inventory" / "staging.ini"
@@ -18,3 +19,7 @@ DEFAULT_HOST = "zabbix"
 
 ZABBIX_SERVER_CONF = "/etc/zabbix/zabbix_server.conf"
 ZABBIX_SERVER_CONF_DIST = "/etc/zabbix/zabbix_server.conf.dpkg-dist"
+
+DEFAULT_OS_FAMILY = "Ubuntu 24.04"
+DEFAULT_DB_TYPE = "PostgreSQL"
+DEFAULT_FRONTEND_TYPE = "Apache/PHP"

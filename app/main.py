@@ -1,9 +1,9 @@
 import json
 import sys
-
+import re
 from openai import OpenAI
 
-from config import DEFAULT_MODEL
+from config import DEFAULT_MODEL, DEFAULT_TARGET_MAJOR
 from tools import (
     check_remote_file_exists,
     fetch_official_url_text,
@@ -51,7 +51,19 @@ def ask_model(prompt: str, context: dict) -> str:
     return response.output_text
 
 
-def prepare_upgrade_workflow(host: str = "zabbix") -> None:
+def extract_major_version(version_output: str) -> str | None:
+    match = re.search(r"Zabbix\)\s+(\d+\.\d+)\.\d+", version_output)
+    if match:
+        return match.group(1)
+    return None
+
+
+def get_installed_major_version(host: str = "zabbix") -> tuple[dict, str | None]:
+    version_result = get_zabbix_version(host=host)
+    installed_major = extract_major_version(version_result.get("stdout", ""))
+    return version_result, installed_major
+
+def prepare_upgrade_workflow(host: str = "zabbix", target_major: str = DEFAULT_TARGET_MAJOR) -> None:
     print("\n=== STEP 1: COLLECT VERSION ===\n")
     version_result = get_zabbix_version(host=host)
     print(json.dumps(version_result, indent=2))
@@ -74,7 +86,7 @@ def prepare_upgrade_workflow(host: str = "zabbix") -> None:
     print("\n=== STEP 4: AI SUMMARY ===\n")
     summary = ask_model(
         prompt=(
-            "Summarize the current Zabbix upgrade readiness for this host. "
+            f"Summarize the current Zabbix upgrade readiness for this host for an upgrade toward {target_major}. "
             "State whether the host looks ready for backup as the next step."
         ),
         context=summary_context,
@@ -127,7 +139,7 @@ def prepare_upgrade_workflow(host: str = "zabbix") -> None:
     )
     print(final_summary)
 
-def execute_upgrade_workflow(host: str = "zabbix") -> None:
+def execute_upgrade_workflow(host: str = "zabbix", target_major: str = DEFAULT_TARGET_MAJOR) -> None:
     print("\n=== STEP 1: VERSION CHECK ===\n")
     version_result = get_zabbix_version(host=host)
     print(json.dumps(version_result, indent=2))
@@ -135,8 +147,7 @@ def execute_upgrade_workflow(host: str = "zabbix") -> None:
     print("\n=== STEP 2: APPROVAL GATE FOR REPO SWITCH ===\n")
     repo_approval = require_approval(
         action_summary=(
-            f"Switch host '{host}' from Zabbix 7.2 repository to Zabbix 7.4 repository "
-            "before attempting package upgrade."
+            f"Switch host '{host}' to the Zabbix {target_major} repository before attempting package upgrade."
         )
     )
     print(json.dumps(repo_approval, indent=2))
@@ -158,7 +169,7 @@ def execute_upgrade_workflow(host: str = "zabbix") -> None:
     print("\n=== STEP 4: APPROVAL GATE FOR PACKAGE UPGRADE ===\n")
     upgrade_approval = require_approval(
         action_summary=(
-            f"Run upgrade playbook for host '{host}' after successful repo switch to 7.4."
+            f"Run upgrade playbook for host '{host}' after successful repo switch to {target_major}."
         )
     )
     print(json.dumps(upgrade_approval, indent=2))
@@ -190,7 +201,7 @@ def execute_upgrade_workflow(host: str = "zabbix") -> None:
     final_summary = ask_model(
         prompt=(
             "Summarize the Zabbix repository switch and upgrade execution workflow. "
-            "State whether the host appears to have moved from 7.2 toward 7.4, "
+            "State whether the host appears to have moved toward the configured target version, "
             "highlight any failures, and recommend the next safe operational step."
         ),
         context=final_context,
@@ -198,8 +209,8 @@ def execute_upgrade_workflow(host: str = "zabbix") -> None:
     print(final_summary)
 
 def analyze_upgrade_notes_workflow(
-    from_version: str = "7.2",
-    to_version: str = "7.4",
+    from_version: str,
+    to_version: str = DEFAULT_TARGET_MAJOR,
 ) -> None:
     print("\n=== STEP 1: GET OFFICIAL UPGRADE NOTE URLS ===\n")
     urls_result = get_official_zabbix_upgrade_note_urls(
@@ -296,7 +307,7 @@ def analyze_zabbix_server_config_review_workflow(host: str = "zabbix") -> None:
         "environment": {
             "os": "Ubuntu 24.04",
             "role": "Zabbix server with PostgreSQL and Apache/PHP frontend",
-            "upgrade_context": "Upgraded from 7.2 to 7.4",
+            "upgrade_context": "Upgraded toward the configured target version",
         },
     }
 
@@ -333,7 +344,18 @@ def main() -> None:
         return
 
     if "upgrade notes" in user_input or "release notes" in user_input:
-        analyze_upgrade_notes_workflow(from_version="7.2", to_version="7.4")
+        version_result, installed_major = get_installed_major_version(host="zabbix")
+
+        if not installed_major:
+            print("\n=== WORKFLOW STOPPED ===\n")
+            print("Could not determine installed Zabbix major version from host output.")
+            print(json.dumps(version_result, indent=2))
+            return
+
+        analyze_upgrade_notes_workflow(
+            from_version=installed_major,
+            to_version=DEFAULT_TARGET_MAJOR,
+        )
         return
 
     if "config review" in user_input or "dpkg-dist" in user_input:
@@ -343,9 +365,10 @@ def main() -> None:
     print("Unsupported command pattern for this workflow version.")
     print('Try: python3 main.py "Prepare for a Zabbix upgrade on host zabbix"')
     print('Or:  python3 main.py "Execute the Zabbix upgrade on host zabbix"')
-    print('Or:  python3 main.py "Read the official Zabbix 7.2 to 7.4 upgrade notes"')
+    print('Or:  python3 main.py "Read the official Zabbix upgrade notes"')
     print('Or:  python3 main.py "Run a config review for zabbix_server.conf and dpkg-dist"')
-
+    print('Or:  python3 main.py "Read the official Zabbix upgrade notes"')
 
 if __name__ == "__main__":
     main()
+
