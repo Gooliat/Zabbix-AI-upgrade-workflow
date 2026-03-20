@@ -20,6 +20,8 @@ zabbix_db_user: zabbix
 precheck_required_free_mb_root: 2048
 precheck_required_free_mb_var: 2048
 precheck_required_free_mb_tmp: 512
+precheck_required_free_mb_backup: 2048
+precheck_expected_zabbix_target_major: "7.4"
 
 zabbix_upgrade_package_candidates:
   - zabbix-server-pgsql

@@ -28,6 +28,33 @@
       package_facts:
         manager: auto
 
+    - name: Check installed zabbix-release package version
+      shell: "dpkg -l | awk '/^ii\\s+zabbix-release/ {print $2, $3}'"
+      register: zabbix_release_version
+      changed_when: false
+
+    - name: Show installed zabbix-release package version
+      debug:
+        var: zabbix_release_version.stdout
+
+    - name: Check apt candidate versions for key Zabbix packages
+      shell: |
+        apt-cache policy zabbix-server-pgsql zabbix-frontend-php zabbix-agent2 \
+        | sed -n '/Candidate:/p'
+      register: zabbix_candidate_versions
+      changed_when: false
+
+    - name: Show apt candidate versions for key Zabbix packages
+      debug:
+        var: zabbix_candidate_versions.stdout_lines
+
+    - name: Assert apt candidates match expected target major version
+      assert:
+        that:
+          - precheck_expected_zabbix_target_major in zabbix_candidate_versions.stdout
+        fail_msg: "APT candidate versions do not match expected Zabbix target major version {{ precheck_expected_zabbix_target_major }}"
+        success_msg: "APT candidate versions match expected Zabbix target major version {{ precheck_expected_zabbix_target_major }}"
+
     - name: Gather service facts
       service_facts:
 
@@ -85,6 +112,82 @@
             | list
           }}
 
+    - name: Check PHP modules for curl support
+      shell: "php -m | grep -i '^curl$'"
+      register: php_curl_module_check
+      changed_when: false
+
+    - name: Show PHP curl module check
+      debug:
+        var: php_curl_module_check.stdout
+
+    - name: Assert PHP curl module is installed and active
+      assert:
+        that:
+          - php_curl_module_check.rc == 0
+        fail_msg: "PHP curl module is not installed or not active"
+        success_msg: "PHP curl module is installed and active"
+
+    - name: Check PHP cURL information
+      shell: "php -i | grep -i 'cURL support\\|cURL Information' || true"
+      register: php_curl_info
+      changed_when: false
+
+    - name: Show PHP cURL information
+      debug:
+        var: php_curl_info.stdout_lines
+
+    - name: Test PostgreSQL access to Zabbix database
+      shell: >
+        sudo -u {{ postgresql_backup_user }}
+        psql -d {{ zabbix_db_name }} -c '\dt'
+      register: postgres_zabbix_db_check
+      changed_when: false
+
+    - name: Show PostgreSQL access check summary
+      debug:
+        msg:
+          - "PostgreSQL DB access rc: {{ postgres_zabbix_db_check.rc }}"
+          - "PostgreSQL DB access stdout lines captured: {{ postgres_zabbix_db_check.stdout_lines | length }}"
+
+    - name: Assert PostgreSQL access to Zabbix database works
+      assert:
+        that:
+          - postgres_zabbix_db_check.rc == 0
+        fail_msg: "Could not access PostgreSQL database {{ zabbix_db_name }} as {{ postgresql_backup_user }}"
+        success_msg: "PostgreSQL access to database {{ zabbix_db_name }} works"
+
+    - name: Check backup root path exists
+      stat:
+        path: "{{ zabbix_backup_dir }}"
+      register: zabbix_backup_root_stat
+
+    - name: Assert backup root path exists
+      assert:
+        that:
+          - zabbix_backup_root_stat.stat.exists
+          - zabbix_backup_root_stat.stat.isdir
+        fail_msg: "Backup root path {{ zabbix_backup_dir }} does not exist or is not a directory"
+        success_msg: "Backup root path {{ zabbix_backup_dir }} exists"
+
+    - name: Check free space on backup root filesystem
+      shell: "df -Pm {{ zabbix_backup_dir }} | awk 'NR==2 {print $4}'"
+      register: backup_root_free_mb
+      changed_when: false
+
+    - name: Show free space on backup root filesystem
+      debug:
+        msg:
+          - "Backup path: {{ zabbix_backup_dir }}"
+          - "Free MB on backup filesystem: {{ backup_root_free_mb.stdout }}"
+
+    - name: Assert free space on backup filesystem
+      assert:
+        that:
+          - backup_root_free_mb.stdout | int >= precheck_required_free_mb_backup
+        fail_msg: "Free space on backup filesystem is below required threshold of {{ precheck_required_free_mb_backup }} MB"
+        success_msg: "Free space on backup filesystem is OK"
+
     - name: Check zabbix-server service presence
       debug:
         msg: >-
@@ -99,6 +202,22 @@
       apt:
         update_cache: true
       changed_when: false
+
+    - name: Check Zabbix log file permissions if present
+      shell: "find /var/log/zabbix -maxdepth 1 -type f 2>/dev/null | xargs -r ls -l"
+      register: zabbix_log_permissions
+      changed_when: false
+
+    - name: Show Zabbix log file permissions
+      debug:
+        var: zabbix_log_permissions.stdout_lines
+
+    - name: Warn about potential log reader impact after 7.4 permission changes
+      debug:
+        msg:
+          - "Review whether any external log readers, shippers, or monitoring processes depend on broader read permissions to /var/log/zabbix/*."
+          - "Zabbix 7.4.x tightened permissions on several files to 0640 in some cases."
+      when: zabbix_log_permissions.stdout | length > 0
 
     - name: Check backup directory parent exists
       stat:
@@ -121,3 +240,8 @@
           - "Config dir exists: {{ zabbix_config_dir_stat.stat.exists }}"
           - "Web dir exists: {{ zabbix_web_dir_stat.stat.exists }}"
           - "zabbix_server.conf exists: {{ zabbix_server_conf_stat.stat.exists }}"
+          - "zabbix-release: {{ zabbix_release_version.stdout }}"
+          - "Backup path: {{ zabbix_backup_dir }}"
+          - "Backup free MB: {{ backup_root_free_mb.stdout }}"
+          - "PHP curl module active: {{ php_curl_module_check.rc == 0 }}"
+          - "PostgreSQL DB access works: {{ postgres_zabbix_db_check.rc == 0 }}"
