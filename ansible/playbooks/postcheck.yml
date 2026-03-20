@@ -43,6 +43,22 @@
         fail_msg: "apache2.service is not running"
         success_msg: "apache2.service is running"
 
+    - name: Check zabbix_server runtime version
+      shell: "zabbix_server --version | head -n 1"
+      register: zabbix_runtime_version
+      changed_when: false
+
+    - name: Show zabbix_server runtime version
+      debug:
+        var: zabbix_runtime_version.stdout
+
+    - name: Assert runtime version is 7.4.x
+      assert:
+        that:
+          - "'7.4' in zabbix_runtime_version.stdout"
+        fail_msg: "zabbix_server runtime version is not 7.4.x"
+        success_msg: "zabbix_server runtime version is 7.4.x"
+
     - name: Check frontend HTTP response
       uri:
         url: "http://{{ ansible_facts['default_ipv4']['address'] }}/zabbix"
@@ -63,3 +79,22 @@
     - name: Print recent zabbix-server log lines
       debug:
         var: zabbix_journal.stdout_lines
+
+    - name: Scan recent zabbix-server logs for obvious failure patterns
+      shell: >
+        journalctl -u zabbix-server -n {{ zabbix_postcheck_log_lines }} --no-pager
+        | grep -Ei 'failed|cannot|error|database is down|unsupported parameter'
+        || true
+      register: zabbix_log_error_scan
+      changed_when: false
+
+    - name: Show matched failure-pattern log lines
+      debug:
+        var: zabbix_log_error_scan.stdout_lines
+
+    - name: Warn if obvious failure patterns were detected in logs
+      debug:
+        msg:
+          - "Potentially problematic log lines were detected in zabbix-server logs."
+          - "Review zabbix_log_error_scan.stdout_lines before declaring the upgrade fully healthy."
+      when: zabbix_log_error_scan.stdout | length > 0

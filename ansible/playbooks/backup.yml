@@ -103,6 +103,20 @@
         dest: "{{ backup_metadata_dir }}/zabbix_server.conf"
         remote_src: true
         mode: preserve
+    - name: Stop zabbix-server before DB backup
+      service:
+        name: zabbix-server
+        state: stopped
+
+    - name: Collect service facts after stopping zabbix-server
+      service_facts:
+
+    - name: Assert zabbix-server is stopped before DB backup
+      assert:
+        that:
+          - ansible_facts['services']['zabbix-server.service']['state'] == 'stopped'
+        fail_msg: "zabbix-server.service is not stopped before DB backup"
+        success_msg: "zabbix-server.service is stopped before DB backup"
 
     - name: Check whether pg_dump exists
       command: which pg_dump
@@ -154,6 +168,37 @@
           stdout={{ pg_dump_result.stdout | default('') }}
           stderr={{ pg_dump_result.stderr | default('') }}
 
+    - name: Check database dump file exists
+      stat:
+        path: "{{ backup_db_dir }}/{{ zabbix_db_name }}.dump"
+      register: zabbix_db_dump_stat
+
+    - name: Assert database dump file exists and is non-empty
+      assert:
+        that:
+          - zabbix_db_dump_stat.stat.exists
+          - zabbix_db_dump_stat.stat.size | int > 0
+        fail_msg: "Database dump file is missing or empty"
+        success_msg: "Database dump file exists and is non-empty"
+
+    - name: Validate PostgreSQL custom-format dump structure
+      become: true
+      become_user: "{{ postgresql_backup_user }}"
+      command:
+        argv:
+          - pg_restore
+          - -l
+          - "{{ backup_db_dir }}/{{ zabbix_db_name }}.dump"
+      register: pg_restore_list_result
+      changed_when: false
+
+    - name: Assert pg_restore can read the dump
+      assert:
+        that:
+          - pg_restore_list_result.rc == 0
+        fail_msg: "pg_restore could not read the dump file"
+        success_msg: "pg_restore successfully read the dump file"
+
     - name: Archive /etc/zabbix
       archive:
         path: "{{ zabbix_config_dir }}"
@@ -195,11 +240,28 @@
           | list
           | length > 0
 
+    - name: Start zabbix-server after DB backup and file backup
+      service:
+        name: zabbix-server
+        state: started
+
+    - name: Collect service facts after starting zabbix-server
+      service_facts:
+
+    - name: Assert zabbix-server is running after backup
+      assert:
+        that:
+          - ansible_facts['services']['zabbix-server.service']['state'] == 'running'
+        fail_msg: "zabbix-server.service is not running after backup"
+        success_msg: "zabbix-server.service is running after backup"
+
     - name: Show final backup summary
       debug:
         msg:
           - "Backup completed successfully"
           - "Backup root: {{ backup_root }}"
           - "Database dump: {{ backup_db_dir }}/{{ zabbix_db_name }}.dump"
+          - "Database dump size: {{ zabbix_db_dump_stat.stat.size }} bytes"
           - "Config archive: {{ backup_config_dir }}/etc_zabbix.tar.gz"
           - "Web archive created: {{ zabbix_web_dir_stat.stat.exists }}"
+          - "zabbix-server.service state after backup: {{ ansible_facts['services']['zabbix-server.service']['state'] | default('unknown') }}"

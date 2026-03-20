@@ -55,6 +55,15 @@
       debug:
         var: zabbix_upgrade_result
 
+    - name: Find package-generated config review files
+      shell: "find /etc/zabbix /etc/apache2 -type f | grep -E 'dpkg-(dist|old|new)$' || true"
+      register: dpkg_review_files
+      changed_when: false
+
+    - name: Show package-generated config review files
+      debug:
+        var: dpkg_review_files.stdout_lines
+
     - name: Restart Zabbix-related services
       ansible.builtin.service:
         name: "{{ item }}"
@@ -92,3 +101,9 @@
     - name: Print recent zabbix-server log lines
       debug:
         var: zabbix_journal.stdout_lines
+
+    - name: Remind operator to clear browser cache/cookies if needed
+      debug:
+        msg:
+          - "If the frontend behaves oddly after upgrade, clear browser cookies and cache for the Zabbix UI."
+          - "Review any .dpkg-dist/.dpkg-old/.dpkg-new files before declaring the upgrade fully complete."
